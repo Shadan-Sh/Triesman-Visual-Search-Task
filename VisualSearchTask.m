@@ -41,6 +41,11 @@ try
     Screen('TextFont', window, 'Arial');
     Screen('TextSize', window, 24);
 
+    % ===== Make key handling robust =====
+    KbName('UnifyKeyNames');
+    allowedKeys = [KbName('y') KbName('n') KbName('ESCAPE') KbName('space')];
+    RestrictKeysForKbCheck(allowedKeys);  % فقط همین کلیدها اثر دارند
+
     % Stimulus parameters
     stimSize = 40;              % Size of shapes in pixels
     minDistance = stimSize * 2; % Minimum distance between stimuli
@@ -85,7 +90,9 @@ try
     % Transition to the real experiment
     Screen('FillRect', window, gray);
     DrawFormattedText(window, 'Practice complete!\n\nPress SPACE to start the real experiment', 'center', 'center', white);
-    Screen('Flip', window); KbWait([], 2);
+    Screen('Flip', window); 
+    KbReleaseWait;                    % تخلیهٔ کلیدهای قبلی
+    WaitForSpaceOnly;                 % منتظر SPACE
 
     %% MAIN EXPERIMENT LOOP
     results = struct();
@@ -124,8 +131,6 @@ try
         results(trial).correct    = (response == 'y' && trials(trial).present) || ...
                                     (response == 'n' && ~trials(trial).present);
 
-        % Feedback        % (No feedback in main block)
-
         % ITI
         WaitSecs(0.5);
 
@@ -138,14 +143,16 @@ try
     %% Results Summary
     ShowResults(window, xCenter, yCenter, white, results);
 
-    %% Save Results (with subID in file + column)
-    SaveResults(results, subID);
+    %% Save Results (append ALL participants into one file)
+    SaveResultsAppend(results, subID);
 
     %% Cleanup
+    RestrictKeysForKbCheck([]);  % برگرداندن وضعیت کلیدها
     Screen('CloseAll');
     fprintf('Experiment completed successfully!\n');
 
 catch ME
+    RestrictKeysForKbCheck([]);
     Screen('CloseAll');
     rethrow(ME);
 end
@@ -172,7 +179,8 @@ function ShowInstructions(window, xCenter, yCenter, textColor)
     end
     Screen('Flip', window);
 
-    KbWait([], 2); % Wait for key press
+    KbReleaseWait;     % تخلیهٔ کلیدهای قبلی
+    WaitForSpaceOnly;  % منتظر فقط SPACE
 end
 
 function ShowTargetExample(window, xCenter, yCenter, stimSize, red, white, black, forPractice)
@@ -192,7 +200,8 @@ function ShowTargetExample(window, xCenter, yCenter, stimSize, red, white, black
     end
 
     Screen('Flip', window);
-    KbWait([], 2); % Wait for key press
+    KbReleaseWait;
+    WaitForSpaceOnly;
 end
 
 function RunPracticeBlock(window, xCenter, yCenter, screenXpixels, screenYpixels, stimSize, minDistance, white, black, red, blue)
@@ -224,7 +233,9 @@ function RunPracticeBlock(window, xCenter, yCenter, screenXpixels, screenYpixels
                                'Respond with Y (present) / N (absent).\n' ...
                                'Try to be fast and accurate.\n\n' ...
                                'Press SPACE to begin practice'], 'center', 'center', white);
-    Screen('Flip', window); KbWait([],2);
+    Screen('Flip', window); 
+    KbReleaseWait; 
+    WaitForSpaceOnly;
 
     % Run practice trials (no saving)
     for i = 1:length(trialsP)
@@ -414,6 +425,7 @@ function [response, RT] = PresentSearchDisplay(window, stimuli, stimSize, white,
     end
 
     RT = GetSecs - startTime;
+    KbReleaseWait; % جلوگیری از حمل شدن کلید به صفحهٔ بعد
 end
 
 function DrawTriangle(window, x, y, sz, fillColor, lineColor)
@@ -473,7 +485,10 @@ function ShowBreak(window, xCenter, yCenter, textColor, currentTrial, totalTrial
     end
 
     Screen('Flip', window);
-    KbWait([], 2);
+
+    % ===== نگه داشتن پیام روی صفحه تا وقتی SPACE زده شود =====
+    KbReleaseWait;       % تخلیهٔ کلیدهای قبلی (debounce)
+    WaitForSpaceOnly;    % فقط با SPACE ادامه بده (پیام محو نمی‌شود)
 end
 
 function ShowResults(window, xCenter, yCenter, textColor, results)
@@ -505,33 +520,62 @@ function ShowResults(window, xCenter, yCenter, textColor, results)
     end
 
     Screen('Flip', window);
-    KbWait([], 2);
+    KbReleaseWait;
+    WaitForSpaceOnly;
 end
 
-function SaveResults(results, subID)
-    % Save results to CSV file, including subject ID in filename and as a column
-    ts = datestr(now, 'yyyymmdd_HHMMSS');
-    filename = sprintf('visual_search_results_%s_%s.csv', subID, ts);
+function SaveResultsAppend(results, subID)
+    % Append ALL participants' data into ONE CSV file.
+    outdir = 'results';
+    if ~exist(outdir,'dir'), mkdir(outdir); end
 
-    % Open file for writing
-    fid = fopen(filename, 'w');
+    masterFile = fullfile(outdir, 'visual_search_master.csv');
+    writeHeader = ~isfile(masterFile);
 
-    % Write header
-    fprintf(fid, 'trial,subID,present,searchType,arraySize,response,RT,correct\n');
+    % Open file for append
+    [fid, msg] = fopen(masterFile, 'a');
+    if fid == -1
+        error('Cannot open results file for writing:\n%s\n%s', masterFile, msg);
+    end
 
-    % Write data
+    % Header once
+    if writeHeader
+        fprintf(fid, 'timestamp,date,time,subID,trial,present,searchType,arraySize,response,RT,correct\n');
+    end
+
+    % One timestamp for this save (you می‌تونی per-trial هم بزنی اگر بخوای)
+    ts  = datetime('now');
+    tsS = datestr(ts, 'yyyy-mm-ddTHH:MM:SS.FFF');
+    dS  = datestr(ts, 'yyyy-mm-dd');
+    tS  = datestr(ts, 'HH:MM:SS');
+
+    % Write data (only filled trials)
     for i = 1:length(results)
-        fprintf(fid, '%d,%s,%d,%s,%d,%s,%.3f,%d\n', ...
-            results(i).trial, ...
-            subID, ...
-            results(i).present, ...
-            results(i).searchType, ...
-            results(i).arraySize, ...
-            results(i).response, ...
-            results(i).RT, ...
-            results(i).correct);
+        if ~isempty(results(i)) && isfield(results(i),'trial') && ~isempty(results(i).trial)
+            fprintf(fid, '%s,%s,%s,%s,%d,%d,%s,%d,%s,%.3f,%d\n', ...
+                tsS, dS, tS, subID, ...
+                results(i).trial, ...
+                results(i).present, ...
+                results(i).searchType, ...
+                results(i).arraySize, ...
+                results(i).response, ...
+                results(i).RT, ...
+                results(i).correct);
+        end
     end
 
     fclose(fid);
-    fprintf('Results saved to: %s\n', filename);
+    fprintf('Appended to: %s\n', masterFile);
+end
+
+% ===== Utility: wait only for SPACE (keeps screen static) =====
+function WaitForSpaceOnly
+    while true
+        [isDown, ~, keyCode] = KbCheck;
+        if isDown && keyCode(KbName('space'))
+            KbReleaseWait; % after press, wait for release to avoid carry-over
+            break;
+        end
+        WaitSecs(0.01);
+    end
 end
