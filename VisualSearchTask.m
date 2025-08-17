@@ -90,9 +90,9 @@ try
     % Transition to the real experiment
     Screen('FillRect', window, gray);
     DrawFormattedText(window, 'Practice complete!\n\nPress SPACE to start the real experiment', 'center', 'center', white);
-    Screen('Flip', window); 
-    KbReleaseWait;                    % تخلیهٔ کلیدهای قبلی
-    WaitForSpaceOnly;                 % منتظر SPACE
+    Screen('Flip', window);
+    KbReleaseWait;
+    WaitForSpaceOnly;
 
     %% MAIN EXPERIMENT LOOP
     results = struct();
@@ -117,7 +117,6 @@ try
         WaitSecs(0.5);
 
         % Present search display and record response
-        startTime = GetSecs;
         [response, RT] = PresentSearchDisplay(window, stimuli, stimSize, white, black, red, blue);
 
         % Record results
@@ -143,11 +142,11 @@ try
     %% Results Summary
     ShowResults(window, xCenter, yCenter, white, results);
 
-    %% Save Results (append ALL participants into one file)
-    SaveResultsAppend(results, subID);
+    %% Save Results -> Excel (single master file with subID column)
+    SaveResultsToExcel(results);
 
     %% Cleanup
-    RestrictKeysForKbCheck([]);  % برگرداندن وضعیت کلیدها
+    RestrictKeysForKbCheck([]);
     Screen('CloseAll');
     fprintf('Experiment completed successfully!\n');
 
@@ -179,12 +178,11 @@ function ShowInstructions(window, xCenter, yCenter, textColor)
     end
     Screen('Flip', window);
 
-    KbReleaseWait;     % تخلیهٔ کلیدهای قبلی
-    WaitForSpaceOnly;  % منتظر فقط SPACE
+    KbReleaseWait;
+    WaitForSpaceOnly;
 end
 
 function ShowTargetExample(window, xCenter, yCenter, stimSize, red, white, black, forPractice)
-    % If forPractice==true, show text to start PRACTICE; otherwise start experiment
     if nargin < 8 || isempty(forPractice), forPractice = false; end
 
     Screen('FillRect', window, [128 128 128]); % Gray background
@@ -205,11 +203,10 @@ function ShowTargetExample(window, xCenter, yCenter, stimSize, red, white, black
 end
 
 function RunPracticeBlock(window, xCenter, yCenter, screenXpixels, screenYpixels, stimSize, minDistance, white, black, red, blue)
-    % Define a smaller set of trials for practice (not saved)
     presentAbsent_prac = [1, 0];
     searchTypes_prac   = {'feature','conjunction'};
     arraySizes_prac    = [4, 8];
-    reps_prac          = 2; % total practice trials = 2*2*2*2 = 16
+    reps_prac          = 2; % 16 practice trials
 
     trialsP = [];
     t = 1;
@@ -227,39 +224,31 @@ function RunPracticeBlock(window, xCenter, yCenter, screenXpixels, screenYpixels
     end
     trialsP = trialsP(randperm(length(trialsP)));
 
-    % Intro message for practice
     Screen('FillRect', window, [128 128 128]);
     DrawFormattedText(window, ['Practice block:\n' ...
                                'Respond with Y (present) / N (absent).\n' ...
                                'Try to be fast and accurate.\n\n' ...
                                'Press SPACE to begin practice'], 'center', 'center', white);
-    Screen('Flip', window); 
-    KbReleaseWait; 
+    Screen('Flip', window);
+    KbReleaseWait;
     WaitForSpaceOnly;
 
-    % Run practice trials (no saving)
     for i = 1:length(trialsP)
-        % Positions
         positions = GeneratePositions(trialsP(i).arraySize, screenXpixels, screenYpixels, minDistance);
-        % Stimuli
         stimuli   = GenerateStimuli(trialsP(i), positions);
 
-        % Fixation
         DrawFixation(window, xCenter, yCenter, white);
         Screen('Flip', window); WaitSecs(0.5);
 
-        % Present & respond
         [response, ~] = PresentSearchDisplay(window, stimuli, stimSize, white, black, red, blue);
         correct = (response == 'y' && trialsP(i).present) || (response == 'n' && ~trialsP(i).present);
 
-        % Feedback
         ShowFeedback(window, xCenter, yCenter, correct, white, red);
         WaitSecs(0.4);
     end
 end
 
 function positions = GeneratePositions(arraySize, screenXpixels, screenYpixels, minDistance)
-    % Generate random positions ensuring minimum distance between items
     margin = 100; % Margin from screen edges
     maxAttempts = 1000;
 
@@ -276,13 +265,11 @@ function positions = GeneratePositions(arraySize, screenXpixels, screenYpixels, 
             if i == 1
                 validPosition = true;
             else
-                % Check distance from all previous positions
                 distances = sqrt(sum((positions(1:i-1, :) - [x, y]).^2, 2));
                 if all(distances >= minDistance)
                     validPosition = true;
                 end
             end
-
             attempts = attempts + 1;
         end
 
@@ -306,74 +293,73 @@ function positions = GeneratePositions(arraySize, screenXpixels, screenYpixels, 
 end
 
 function stimuli = GenerateStimuli(trial, positions)
-    arraySize = trial.arraySize;
-    present = trial.present;
+    arraySize  = trial.arraySize;
+    present    = trial.present;
     searchType = trial.searchType;
 
     stimuli = struct();
 
     if present
-        % Target is present
-        targetPos = randi(arraySize); % Random position for target
+        % Target present at a random slot
+        targetPos = randi(arraySize);
         stimuli(targetPos).shape = 'triangle';
         stimuli(targetPos).color = 'red';
         stimuli(targetPos).x = positions(targetPos, 1);
         stimuli(targetPos).y = positions(targetPos, 2);
 
-        % Generate distractors
-        for i = 1:arraySize
-            if i ~= targetPos
-                stimuli(i).x = positions(i, 1);
-                stimuli(i).y = positions(i, 2);
-
-                if strcmp(searchType, 'feature')
-                    % Feature search: distractors differ by one feature
-                    if rand() < 0.5
-                        % Blue triangles
-                        stimuli(i).shape = 'triangle';
-                        stimuli(i).color = 'blue';
-                    else
-                        % Red squares
-                        stimuli(i).shape = 'square';
-                        stimuli(i).color = 'red';
-                    end
+        % Distractors
+        if strcmp(searchType,'feature')
+            % === FIX: در feature search همه دیستراکتورها یکدست باشند ===
+            if rand < 0.5
+                dShape = 'triangle'; dColor = 'blue'; % تفاوت در رنگ
+            else
+                dShape = 'square';   dColor = 'red';  % تفاوت در شکل
+            end
+            for i = 1:arraySize
+                if i == targetPos, continue; end
+                stimuli(i).x = positions(i,1);
+                stimuli(i).y = positions(i,2);
+                stimuli(i).shape = dShape;
+                stimuli(i).color = dColor;
+            end
+        else
+            % Conjunction: مخلوطِ مثلث-آبی و مربع-قرمز
+            for i = 1:arraySize
+                if i == targetPos, continue; end
+                stimuli(i).x = positions(i,1);
+                stimuli(i).y = positions(i,2);
+                if rand < 0.5
+                    stimuli(i).shape = 'triangle'; stimuli(i).color = 'blue';
                 else
-                    % Conjunction search: distractors share features with target
-                    if rand() < 0.5
-                        % Blue triangles (same shape, different color)
-                        stimuli(i).shape = 'triangle';
-                        stimuli(i).color = 'blue';
-                    else
-                        % Red squares (same color, different shape)
-                        stimuli(i).shape = 'square';
-                        stimuli(i).color = 'red';
-                    end
+                    stimuli(i).shape = 'square';   stimuli(i).color = 'red';
                 end
             end
         end
-    else
-        % Target is absent - generate all distractors
-        for i = 1:arraySize
-            stimuli(i).x = positions(i, 1);
-            stimuli(i).y = positions(i, 2);
 
-            if strcmp(searchType, 'feature')
-                % Feature search: use distractors that differ by one feature
-                if rand() < 0.5
-                    stimuli(i).shape = 'triangle';
-                    stimuli(i).color = 'blue';
-                else
-                    stimuli(i).shape = 'square';
-                    stimuli(i).color = 'red';
-                end
+    else
+        % Target absent: فقط دیستراکتور
+        if strcmp(searchType,'feature')
+            % === FIX: همه از یک نوع باشند تا تفاوت یک‌ویژگی حفظ شود ===
+            if rand < 0.5
+                dShape = 'triangle'; dColor = 'blue';
             else
-                % Conjunction search: use blue triangles and red squares
-                if rand() < 0.5
-                    stimuli(i).shape = 'triangle';
-                    stimuli(i).color = 'blue';
+                dShape = 'square';   dColor = 'red';
+            end
+            for i = 1:arraySize
+                stimuli(i).x = positions(i,1);
+                stimuli(i).y = positions(i,2);
+                stimuli(i).shape = dShape;
+                stimuli(i).color = dColor;
+            end
+        else
+            % Conjunction absent: مخلوطِ دو نوع دیستراکتور
+            for i = 1:arraySize
+                stimuli(i).x = positions(i,1);
+                stimuli(i).y = positions(i,2);
+                if rand < 0.5
+                    stimuli(i).shape = 'triangle'; stimuli(i).color = 'blue';
                 else
-                    stimuli(i).shape = 'square';
-                    stimuli(i).color = 'red';
+                    stimuli(i).shape = 'square';   stimuli(i).color = 'red';
                 end
             end
         end
@@ -381,21 +367,17 @@ function stimuli = GenerateStimuli(trial, positions)
 end
 
 function [response, RT] = PresentSearchDisplay(window, stimuli, stimSize, white, black, red, blue)
-    % Draw all stimuli
     Screen('FillRect', window, [128 128 128]); % Gray background
 
     for i = 1:length(stimuli)
-        x = stimuli(i).x;
-        y = stimuli(i).y;
+        x = stimuli(i).x; y = stimuli(i).y;
 
-        % Set color
         if strcmp(stimuli(i).color, 'red')
             fillColor = red;
         else
             fillColor = blue;
         end
 
-        % Draw shape
         if strcmp(stimuli(i).shape, 'triangle')
             DrawTriangle(window, x, y, stimSize, fillColor, black);
         else
@@ -403,11 +385,9 @@ function [response, RT] = PresentSearchDisplay(window, stimuli, stimSize, white,
         end
     end
 
-    % Show display
     Screen('Flip', window);
-    startTime = GetSecs;
+    t0 = GetSecs;
 
-    % Wait for response
     response = '';
     while isempty(response)
         [keyIsDown, ~, keyCode] = KbCheck;
@@ -418,34 +398,25 @@ function [response, RT] = PresentSearchDisplay(window, stimuli, stimSize, white,
                 response = 'n';
             elseif keyCode(KbName('ESCAPE'))
                 error('Experiment terminated by user');
-            else
-                % Ignore all other keys
             end
         end
+        WaitSecs(0.001); % CPU-friendly
     end
 
-    RT = GetSecs - startTime;
-    KbReleaseWait; % جلوگیری از حمل شدن کلید به صفحهٔ بعد
+    RT = GetSecs - t0;
+    KbReleaseWait;
 end
 
 function DrawTriangle(window, x, y, sz, fillColor, lineColor)
-    % Draw filled triangle (equilateral, pointing up)
     halfSize = sz / 2;
-    trianglePoints = [
-        x,           y - halfSize;   % Top
-        x - halfSize, y + halfSize;  % Bottom-left
-        x + halfSize, y + halfSize   % Bottom-right
-    ]; % n x 2
-
-    Screen('FillPoly',  window, fillColor, trianglePoints, 1); % isConvex=1
+    trianglePoints = [ x, y-halfSize; x-halfSize, y+halfSize; x+halfSize, y+halfSize ];
+    Screen('FillPoly',  window, fillColor, trianglePoints, 1);
     Screen('FramePoly', window, lineColor, trianglePoints, 2);
 end
 
 function DrawSquare(window, x, y, sz, fillColor, lineColor)
-    % Draw filled square
     halfSize = sz / 2;
     rect = [x - halfSize, y - halfSize, x + halfSize, y + halfSize];
-
     Screen('FillRect',  window, fillColor, rect);
     Screen('FrameRect', window, lineColor, rect, 2);
 end
@@ -458,59 +429,51 @@ end
 
 function ShowFeedback(window, xCenter, yCenter, correct, textColor, errorColor)
     Screen('FillRect', window, [128 128 128]);
-
     if correct
         DrawFormattedText(window, 'Correct!', 'center', yCenter, textColor);
     else
         DrawFormattedText(window, 'Incorrect', 'center', yCenter, errorColor);
     end
-
     Screen('Flip', window);
     WaitSecs(0.5);
 end
 
 function ShowBreak(window, xCenter, yCenter, textColor, currentTrial, totalTrials)
     Screen('FillRect', window, [128 128 128]);
-
     breakText = {
         sprintf('Break - Trial %d of %d completed', currentTrial, totalTrials)
         ''
         'Take a short rest'
         'Press SPACE to continue'
     };
-
     yOffset = -50;
     for i = 1:length(breakText)
         DrawFormattedText(window, breakText{i}, 'center', yCenter + yOffset + (i-1)*40, textColor);
     end
-
     Screen('Flip', window);
-
-    % ===== نگه داشتن پیام روی صفحه تا وقتی SPACE زده شود =====
-    KbReleaseWait;       % تخلیهٔ کلیدهای قبلی (debounce)
-    WaitForSpaceOnly;    % فقط با SPACE ادامه بده (پیام محو نمی‌شود)
+    KbReleaseWait;
+    WaitForSpaceOnly;
 end
 
 function ShowResults(window, xCenter, yCenter, textColor, results)
-    % Calculate summary statistics
-    featureTrials = strcmp({results.searchType}, 'feature');
+    featureTrials     = strcmp({results.searchType}, 'feature');
     conjunctionTrials = strcmp({results.searchType}, 'conjunction');
 
     featureAcc = mean([results(featureTrials).correct]) * 100;
     conjunctionAcc = mean([results(conjunctionTrials).correct]) * 100;
 
-    featureRT = mean([results(featureTrials & [results.correct]).RT]) * 1000;
-    conjunctionRT = mean([results(conjunctionTrials & [results.correct]).RT]) * 1000;
+    okMask = [results.correct];
+    featureRT = mean([results(featureTrials & okMask).RT]) * 1000;
+    conjunctionRT = mean([results(conjunctionTrials & okMask).RT]) * 1000;
 
     Screen('FillRect', window, [128 128 128]);
-
     resultText = {
         'Experiment Complete!'
         ''
         sprintf('Feature Search: %.1f%% accurate, %.0f ms', featureAcc, featureRT)
         sprintf('Conjunction Search: %.1f%% accurate, %.0f ms', conjunctionAcc, conjunctionRT)
         ''
-        'Results saved to file'
+        'Results saved to Excel file'
         'Press SPACE to exit'
     };
 
@@ -518,62 +481,59 @@ function ShowResults(window, xCenter, yCenter, textColor, results)
     for i = 1:length(resultText)
         DrawFormattedText(window, resultText{i}, 'center', yCenter + yOffset + (i-1)*40, textColor);
     end
-
     Screen('Flip', window);
     KbReleaseWait;
     WaitForSpaceOnly;
 end
 
-function SaveResultsAppend(results, subID)
-    % Append ALL participants' data into ONE CSV file.
+function SaveResultsToExcel(results)
+    % Save/append ALL participants' data into ONE Excel file with subID column.
     outdir = 'results';
     if ~exist(outdir,'dir'), mkdir(outdir); end
+    xlsxFile = fullfile(outdir, 'visual_search_master.xlsx');
 
-    masterFile = fullfile(outdir, 'visual_search_master.csv');
-    writeHeader = ~isfile(masterFile);
-
-    % Open file for append
-    [fid, msg] = fopen(masterFile, 'a');
-    if fid == -1
-        error('Cannot open results file for writing:\n%s\n%s', masterFile, msg);
-    end
-
-    % Header once
-    if writeHeader
-        fprintf(fid, 'timestamp,date,time,subID,trial,present,searchType,arraySize,response,RT,correct\n');
-    end
-
-    % One timestamp for this save (you می‌تونی per-trial هم بزنی اگر بخوای)
+    n = numel(results);
     ts  = datetime('now');
-    tsS = datestr(ts, 'yyyy-mm-ddTHH:MM:SS.FFF');
-    dS  = datestr(ts, 'yyyy-mm-dd');
-    tS  = datestr(ts, 'HH:MM:SS');
+    tsS = repmat(string(datestr(ts,'yyyy-mm-ddTHH:MM:SS.FFF')), n, 1);
+    dS  = repmat(string(datestr(ts,'yyyy-mm-dd')), n, 1);
+    tS  = repmat(string(datestr(ts,'HH:MM:SS')), n, 1);
 
-    % Write data (only filled trials)
-    for i = 1:length(results)
-        if ~isempty(results(i)) && isfield(results(i),'trial') && ~isempty(results(i).trial)
-            fprintf(fid, '%s,%s,%s,%s,%d,%d,%s,%d,%s,%.3f,%d\n', ...
-                tsS, dS, tS, subID, ...
-                results(i).trial, ...
-                results(i).present, ...
-                results(i).searchType, ...
-                results(i).arraySize, ...
-                results(i).response, ...
-                results(i).RT, ...
-                results(i).correct);
+    T = table;
+    T.timestamp  = tsS;
+    T.date       = dS;
+    T.time       = tS;
+    T.subID      = string({results.subID}');
+    T.trial      = [results.trial]';
+    T.present    = [results.present]';
+    T.searchType = string({results.searchType}');
+    T.arraySize  = [results.arraySize]';
+    T.response   = string({results.response}');
+    T.RT         = [results.RT]';
+    T.correct    = logical([results.correct]');
+
+    if isfile(xlsxFile)
+        % Robust append compatible با نسخه‌های مختلف MATLAB/Excel
+        try
+            T0 = readtable(xlsxFile,'Sheet',1);
+            Tout = [T0; T];
+        catch
+            % اگر فایل باز/قفل بود، باز هم با overwrite کامل می‌نویسیم
+            warning('Could not read existing Excel file. Overwriting with new data + previous kept if readable.');
+            Tout = T;
         end
+        writetable(Tout, xlsxFile, 'Sheet', 1, 'WriteMode','overwritesheet');
+    else
+        writetable(T, xlsxFile, 'Sheet', 1);
     end
 
-    fclose(fid);
-    fprintf('Appended to: %s\n', masterFile);
+    fprintf('Saved/updated Excel: %s\n', xlsxFile);
 end
 
-% ===== Utility: wait only for SPACE (keeps screen static) =====
 function WaitForSpaceOnly
     while true
         [isDown, ~, keyCode] = KbCheck;
         if isDown && keyCode(KbName('space'))
-            KbReleaseWait; % after press, wait for release to avoid carry-over
+            KbReleaseWait;
             break;
         end
         WaitSecs(0.01);
